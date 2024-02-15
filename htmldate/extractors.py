@@ -10,7 +10,7 @@ Custom parsers and XPath expressions for date extraction
 import logging
 import re
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import List, Optional, Pattern, Tuple
 
@@ -296,6 +296,25 @@ def regex_parse(string: str) -> Optional[datetime]:
     return dateobject
 
 
+def parse_timezone(tz_str):
+    if not tz_str:
+        return None
+
+    if tz_str == 'Z':
+        return timezone.utc
+
+    if len(tz_str) < 5:
+        return None
+
+    try:
+        # Parse the timezone offset
+        sign = 1 if tz_str[0] == '+' else -1
+        hours, minutes = map(int, tz_str[1:].split(':'))
+        return timezone(timedelta(hours=sign*hours, minutes=minutes))
+    except ValueError:
+        return None
+
+
 def custom_parse(
     string: str, outputformat: str, acceptable_formats: list[str], min_date: datetime, max_date: datetime
 ) -> Optional[str]:
@@ -356,6 +375,7 @@ def custom_parse(
                 hour = int(match.group("hour") or 0)
                 minute = int(match.group("minute") or 0)
                 second = int(match.group("second") or 0)
+                tz_str = match.group("tz")
             else:
                 day, month, year = (
                     int(match.group("day2")),
@@ -368,8 +388,11 @@ def custom_parse(
                 hour = int(match.group("hour2") or 0)
                 minute = int(match.group("minute2") or 0)
                 second = int(match.group("second2") or 0)
+                tz_str = match.group("tz2")
+            
+            tz_info = parse_timezone(tz_str)
 
-            candidate = datetime(year, month, day, hour, minute, second)
+            candidate = datetime(year, month, day, hour, minute, second, tzinfo=tz_info)
         except ValueError:  # pragma: no cover
             LOGGER.debug("regex value error: %s", match[0])
         else:
@@ -493,8 +516,6 @@ def pattern_search(
         # Directly pass datetime_str to is_valid_date if it matches the expected outputformat.
         if is_valid_date(datetime_str, options.acceptable_formats, earliest=options.min, latest=options.max):
             LOGGER.debug("regex found: %s %s", date_pattern, match[0])
-            # Assuming the outputformat might include more than just date (%Y-%m-%d).
-            # If options.format is strictly a date format, consider formatting datetime_str accordingly.
             return datetime_str
 
         try:
