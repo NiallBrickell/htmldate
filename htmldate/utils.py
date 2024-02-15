@@ -50,7 +50,7 @@ FAULTY_HTML = re.compile(r"(<html.*?)\s*/>", re.I)
 
 class Extractor:
     "Defines a class to store all extraction options."
-    __slots__ = ["extensive", "format", "max", "min", "original"]
+    __slots__ = ["extensive", "format", "max", "min", "original", "acceptable_formats"]
 
     # consider dataclasses for Python 3.7+
     def __init__(
@@ -60,12 +60,14 @@ class Extractor:
         min_date: datetime,
         original_date: bool,
         outputformat: str,
+        acceptable_formats: list[str],
     ) -> None:
         self.extensive: bool = extensive_search
         self.format: str = outputformat
         self.max: datetime = max_date
         self.min: datetime = min_date
         self.original: bool = original_date
+        self.acceptable_formats = tuple(acceptable_formats)
 
 
 def isutf8(data: bytes) -> bool:

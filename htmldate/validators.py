@@ -26,7 +26,7 @@ LOGGER.debug("minimum date setting: %s", MIN_DATE)
 @lru_cache(maxsize=CACHE_SIZE)
 def is_valid_date(
     date_input: Optional[Union[datetime, str]],
-    outputformat: str,
+    acceptable_formats: Union[str, tuple[str]],
     earliest: datetime,
     latest: datetime,
 ) -> bool:
@@ -35,26 +35,37 @@ def is_valid_date(
     if date_input is None:
         return False
 
+    date_object = None
+    if isinstance(acceptable_formats, str):
+        acceptable_formats = (acceptable_formats,)
+
     # try if date can be parsed using chosen outputformat
     if isinstance(date_input, datetime):
-        dateobject = date_input
+        date_object = date_input
     else:
-        # speed-up
-        try:
-            if outputformat == "%Y-%m-%d":
-                dateobject = datetime(
-                    int(date_input[:4]), int(date_input[5:7]), int(date_input[8:10])
-                )
-            # default
-            else:
-                dateobject = datetime.strptime(date_input, outputformat)
-        except ValueError:
-            return False
+        for _format in acceptable_formats:
+            try:
+                # speed-up
+                if _format == "%Y-%m-%d":
+                    date_object = datetime(
+                        int(date_input[:4]), int(date_input[5:7]), int(date_input[8:10])
+                    )
+                else:
+                    # default
+                    date_object = datetime.strptime(date_input, _format)
+
+                break  # found a valid date
+            except ValueError:
+                continue
+
+    if date_object is None:  # None of the formats matched
+        LOGGER.debug("date not valid: %s", date_input)
+        return False
 
     # year first, then full validation: not newer than today or stored variable
     if (
-        earliest.year <= dateobject.year <= latest.year
-        and earliest.timestamp() <= dateobject.timestamp() <= latest.timestamp()
+        earliest.year <= date_object.year <= latest.year
+        and earliest.timestamp() <= date_object.timestamp() <= latest.timestamp()
     ):
         return True
     LOGGER.debug("date not valid: %s", date_input)
@@ -175,7 +186,7 @@ def check_extracted_reference(reference: int, options: Extractor) -> Optional[st
         dateobject = datetime.fromtimestamp(reference)
         converted = dateobject.strftime(options.format)
         if is_valid_date(
-            converted, options.format, earliest=options.min, latest=options.max
+            converted, options.acceptable_formats, earliest=options.min, latest=options.max
         ):
             return converted
     return None

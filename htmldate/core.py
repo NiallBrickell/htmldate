@@ -212,7 +212,7 @@ def examine_text(
 
     text = NON_DIGITS_REGEX.sub("", text[:MAX_SEGMENT_LEN])
     return try_date_expr(
-        text, options.format, options.extensive, options.min, options.max
+        text, options.format, options.acceptable_formats, options.extensive, options.min, options.max
     )
 
 
@@ -256,6 +256,7 @@ def examine_header(
     tryfunc = partial(
         try_date_expr,
         outputformat=options.format,
+        acceptable_formats=options.acceptable_formats,
         extensive_search=options.extensive,
         min_date=options.min,
         max_date=options.max,
@@ -436,7 +437,7 @@ def compare_reference(
 ) -> int:
     """Compare candidate to current date reference (includes date validation and older/newer test)"""
     attempt = try_date_expr(
-        expression, options.format, options.extensive, options.min, options.max
+        expression, options.format, options.acceptable_formats, options.extensive, options.min, options.max
     )
     if attempt is not None:
         return compare_values(reference, attempt, options)
@@ -477,6 +478,7 @@ def examine_abbr_elements(
                         attempt = try_date_expr(
                             trytext,
                             options.format,
+                            options.acceptable_formats,
                             options.extensive,
                             options.min,
                             options.max,
@@ -551,6 +553,7 @@ def examine_time_elements(
                     attempt = try_date_expr(
                         elem.get("datetime"),
                         options.format,
+                        options.acceptable_formats,
                         options.extensive,
                         options.min,
                         options.max,
@@ -774,7 +777,7 @@ def search_page(htmlstring: str, options: Extractor) -> Optional[str]:
     dateobject = regex_parse(htmlstring)  # type: ignore[assignment]
     # todo: find all candidates and disambiguate?
     if is_valid_date(
-        dateobject, options.format, earliest=options.min, latest=options.max
+        dateobject, options.acceptable_formats, earliest=options.min, latest=options.max
     ) and (copyear == 0 or dateobject.year >= copyear):
         try:
             LOGGER.debug("regex result on HTML: %s", dateobject)
@@ -819,6 +822,7 @@ def find_date(
     extensive_search: bool = True,
     original_date: bool = False,
     outputformat: str = "%Y-%m-%d",
+    acceptable_formats: list[str] = None,
     url: Optional[str] = None,
     verbose: bool = False,
     min_date: Optional[Union[datetime, str]] = None,
@@ -875,6 +879,9 @@ def find_date(
     if outputformat != "%Y-%m-%d" and not is_valid_format(outputformat):
         return None
 
+    if acceptable_formats is None:
+        acceptable_formats = [outputformat]
+
     # define options and time boundaries
     options = Extractor(
         extensive_search,
@@ -882,6 +889,7 @@ def find_date(
         get_min_date(min_date),
         original_date,
         outputformat,
+        acceptable_formats,
     )
     # unclear what this line is for and it impedes type checking:
     # find_date.extensive_search = extensive_search

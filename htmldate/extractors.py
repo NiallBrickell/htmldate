@@ -103,8 +103,13 @@ YEAR_RE = "199[0-9]|20[0-3][0-9]"
 # regex cache
 YMD_NO_SEP_PATTERN = re.compile(r"\b(\d{8})\b")
 YMD_PATTERN = re.compile(
-    rf"(?:\D|^)(?:(?P<year>{YEAR_RE})[\-/.](?P<month>{MONTH_RE})[\-/.](?P<day>{DAY_RE})|"
-    rf"(?P<day2>{DAY_RE})[\-/.](?P<month2>{MONTH_RE})[\-/.](?P<year2>\d{{2,4}}))(?:\D|$)"
+    rf"(?:\D|^)(?:"
+    rf"(?P<year>{YEAR_RE})[\-/.](?P<month>{MONTH_RE})[\-/.](?P<day>{DAY_RE})(?:[T\s](?P<hour>[01]?\d|2[0-3]):(?P<minute>[0-5]?\d)(?::(?P<second>[0-5]?\d))?(?:\.\d+)?)?"
+    rf"(?P<tz>Z|(?:\+|-)[01]?\d:?[0-5]?\d)?"
+    rf"|"
+    rf"(?P<day2>{DAY_RE})[\-/.](?P<month2>{MONTH_RE})[\-/.](?P<year2>\d{{2,4}})(?:[T\s](?P<hour2>[01]?\d|2[0-3]):(?P<minute2>[0-5]?\d)(?::(?P<second2>[0-5]?\d))?(?:\.\d+)?)?"
+    rf"(?P<tz2>Z|(?:\+|-)[01]?\d:?[0-5]?\d)?"
+    rf")(?:\D|$)"
 )
 YM_PATTERN = re.compile(
     rf"(?:\D|^)(?:(?P<year>{YEAR_RE})[\-/.](?P<month>{MONTH_RE})|"
@@ -132,9 +137,10 @@ LONG_TEXT_PATTERN = re.compile(
 
 COMPLETE_URL = re.compile(rf"\D({YEAR_RE})[/_-]({MONTH_RE})[/_-]({DAY_RE})(?:\D|$)")
 
-JSON_MODIFIED = re.compile(rf'"dateModified": ?"({YEAR_RE}-{MONTH_RE}-{DAY_RE})', re.I)
+JSON_MODIFIED = re.compile(rf'"dateModified": ?"({YEAR_RE}-{MONTH_RE}-{DAY_RE}(?:[T\s]([0-2]?\d):[0-5]?\d(?::[0-5]?\d)?(?:\.\d+)?(?:Z|[+\-][0-2]?\d:?[0-5]?\d)?)?)', re.I)
 JSON_PUBLISHED = re.compile(
-    rf'"datePublished": ?"({YEAR_RE}-{MONTH_RE}-{DAY_RE})', re.I
+    rf'"datePublished": ?"({YEAR_RE}-{MONTH_RE}-{DAY_RE}(?:[T\s]([0-2]?\d):[0-5]?\d(?::[0-5]?\d)?(?:\.\d+)?(?:Z|[+\-][0-2]?\d:?[0-5]?\d)?)?)',
+    re.I
 )
 TIMESTAMP_PATTERN = re.compile(
     rf"({YEAR_RE}-{MONTH_RE}-{DAY_RE}).[0-9]{{2}}:[0-9]{{2}}:[0-9]{{2}}"
@@ -291,7 +297,7 @@ def regex_parse(string: str) -> Optional[datetime]:
 
 
 def custom_parse(
-    string: str, outputformat: str, min_date: datetime, max_date: datetime
+    string: str, outputformat: str, acceptable_formats: list[str], min_date: datetime, max_date: datetime
 ) -> Optional[str]:
     """Try to bypass the slow dateparser"""
     LOGGER.debug("custom parse test: %s", string)
@@ -319,7 +325,7 @@ def custom_parse(
                     LOGGER.debug("dateutil parsing error: %s", string)
         # c. plausibility test
         if candidate is not None and (
-            is_valid_date(candidate, outputformat, earliest=min_date, latest=max_date)
+            is_valid_date(candidate, acceptable_formats, earliest=min_date, latest=max_date)
         ):
             LOGGER.debug("parsing result: %s", candidate)
             return candidate.strftime(outputformat)
@@ -347,6 +353,9 @@ def custom_parse(
                     int(match.group("month")),
                     int(match.group("day")),
                 )
+                hour = int(match.group("hour") or 0)
+                minute = int(match.group("minute") or 0)
+                second = int(match.group("second") or 0)
             else:
                 day, month, year = (
                     int(match.group("day2")),
@@ -355,8 +364,12 @@ def custom_parse(
                 )
                 year = correct_year(year)
                 day, month = try_swap_values(day, month)
+                # Extract time components
+                hour = int(match.group("hour2") or 0)
+                minute = int(match.group("minute2") or 0)
+                second = int(match.group("second2") or 0)
 
-            candidate = datetime(year, month, day)
+            candidate = datetime(year, month, day, hour, minute, second)
         except ValueError:  # pragma: no cover
             LOGGER.debug("regex value error: %s", match[0])
         else:
@@ -385,7 +398,7 @@ def custom_parse(
 
     # 5. Try the other regex pattern
     dateobject = regex_parse(string)
-    if is_valid_date(dateobject, outputformat, earliest=min_date, latest=max_date):
+    if is_valid_date(dateobject, acceptable_formats, earliest=min_date, latest=max_date):
         try:
             LOGGER.debug("custom parse result: %s", dateobject)
             return dateobject.strftime(outputformat)  # type: ignore
@@ -412,6 +425,7 @@ def external_date_parser(string: str, outputformat: str) -> Optional[str]:
 def try_date_expr(
     string: Optional[str],
     outputformat: str,
+    acceptable_formats: list[str],
     extensive_search: bool,
     min_date: datetime,
     max_date: datetime,
@@ -432,7 +446,7 @@ def try_date_expr(
         return None
 
     # try to parse using the faster method
-    customresult = custom_parse(string, outputformat, min_date, max_date)
+    customresult = custom_parse(string, outputformat, acceptable_formats, min_date, max_date)
     if customresult is not None:
         return customresult
 
@@ -444,7 +458,7 @@ def try_date_expr(
         # send to date parser
         dateparser_result = external_date_parser(string, outputformat)
         if is_valid_date(
-            dateparser_result, outputformat, earliest=min_date, latest=max_date
+            dateparser_result, acceptable_formats, earliest=min_date, latest=max_date
         ):
             return dateparser_result
 
@@ -472,13 +486,25 @@ def pattern_search(
     date_pattern: Pattern[str],
     options: Extractor,
 ) -> Optional[str]:
-    "Look for date expressions using a regular expression on a string of text."
+    """Look for date and time expressions using a regular expression on a string of text."""
     match = date_pattern.search(text)
-    if match and is_valid_date(
-        match[1], "%Y-%m-%d", earliest=options.min, latest=options.max
-    ):
-        LOGGER.debug("regex found: %s %s", date_pattern, match[0])
-        return convert_date(match[1], "%Y-%m-%d", options.format)
+    if match:
+        datetime_str = match[1]  # Full datetime string including time and timezone.
+        # Directly pass datetime_str to is_valid_date if it matches the expected outputformat.
+        if is_valid_date(datetime_str, options.acceptable_formats, earliest=options.min, latest=options.max):
+            LOGGER.debug("regex found: %s %s", date_pattern, match[0])
+            # Assuming the outputformat might include more than just date (%Y-%m-%d).
+            # If options.format is strictly a date format, consider formatting datetime_str accordingly.
+            return datetime_str
+
+        try:
+            # Fallback to date part only for broader compatibility.
+            date_part = datetime_str.split('T')[0]  # Extract just the date part.
+            if is_valid_date(date_part, "%Y-%m-%d", earliest=options.min, latest=options.max):
+                # Convert to desired format.
+                return convert_date(date_part, "%Y-%m-%d", options.format)
+        except ValueError:
+            LOGGER.debug("Invalid date format: %s", datetime_str)
     return None
 
 
