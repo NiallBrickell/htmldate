@@ -247,7 +247,7 @@ def extract_url_date(
                     dateobject, options.format, earliest=options.min, latest=options.max
                 ):
                     return dateobject.strftime(options.format)
-            except ValueError as err:  # pragma: no cover
+            except (ValueError, TypeError) as err:  # pragma: no cover
                 LOGGER.debug("conversion error: %s %s", match[0], err)
     return None
 
@@ -290,7 +290,7 @@ def regex_parse(string: str) -> Optional[datetime]:
         year = correct_year(year)
         day, month = try_swap_values(day, month)
         dateobject = datetime(year, month, day)
-    except ValueError:
+    except (ValueError, TypeError):
         return None
     LOGGER.debug("multilingual text found: %s", dateobject)
     return dateobject
@@ -393,7 +393,7 @@ def custom_parse(
             tz_info = parse_timezone(tz_str)
 
             candidate = datetime(year, month, day, hour, minute, second, tzinfo=tz_info)
-        except ValueError:  # pragma: no cover
+        except (ValueError, TypeError):  # pragma: no cover
             LOGGER.debug("regex value error: %s", match[0])
         else:
             if is_valid_date(candidate, "%Y-%m-%d", earliest=min_date, latest=max_date):
@@ -412,7 +412,7 @@ def custom_parse(
                 candidate = datetime(
                     int(match.group("year2")), int(match.group("month2")), 1
                 )
-        except ValueError:  # pragma: no cover
+        except (ValueError, TypeError):  # pragma: no cover
             LOGGER.debug("Y-M value error: %s", match[0])
         else:
             if is_valid_date(candidate, "%Y-%m-%d", earliest=min_date, latest=max_date):
